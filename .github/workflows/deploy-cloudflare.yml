@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -21,12 +25,20 @@ jobs:
       - name: Publish Blazor WASM
         run: dotnet publish RallyHelper.Pwa/RallyHelper.Pwa.csproj -c Release -o ./build
 
-      - name: Publish to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
+      - name: Verify build output
+        run: |
+          ls -la ./build/wwwroot
+          test -f ./build/wwwroot/index.html
+          test -f ./build/wwwroot/service-worker.js
+          test -f ./build/wwwroot/_redirects
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
         with:
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: ${{ secrets.CLOUDFLARE_PAGES_PROJECT }}
-          directory: ./build/wwwroot
-          branch: main
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: |
+            pages deploy ./build/wwwroot \
+              --project-name=${{ secrets.CLOUDFLARE_PAGES_PROJECT }} \
+              --branch=main \
+              --commit-dirty=true
