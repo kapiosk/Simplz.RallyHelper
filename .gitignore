@@ -1,5 +1,5 @@
-## .NET / Blazor build artifacts
-bin/
+## Build output
+build/
 obj/
 *.user
 .vs/
