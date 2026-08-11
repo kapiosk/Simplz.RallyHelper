@@ -334,6 +334,15 @@
         if (!TryNum(tDistance, out var d)) d = 0;
         if (TryNum(tAdder, out var a)) d += a;
         tDistance = d.ToString("0.####");
+
+        // Recalculate the time if a speed is already set.
+        if (TryNum(tSpeed, out var sp) && sp > 0)
+        {
+            var hms = RallyMath.ToHms(d / sp * 3600);
+            tH = hms.Hours.ToString();
+            tM = hms.Minutes.ToString("00");
+            tS = hms.Seconds.ToString("00");
+        }
     }
 
     private void AdderEnter(KeyboardEventArgs e)
