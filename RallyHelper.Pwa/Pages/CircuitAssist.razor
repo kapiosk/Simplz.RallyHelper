@@ -1,0 +1,133 @@
+@page "/circuit"
+@implements IDisposable
+
+<PageTitle>Circuit Assistant</PageTitle>
+
+<div class="single">
+    <section class="card">
+        <h2 class="card-title">Circuit Assistant</h2>
+        <p class="hint">Lap timer with cumulative totals.</p>
+
+        <div class="clock circuit @(_running ? "live" : "")">@Display(Elapsed)</div>
+
+        <div class="btn-row">
+            <button class="btn primary" @onclick="Toggle">@(_running ? "Pause" : "Start")</button>
+            <button class="btn" @onclick="Lap" disabled="@(!_running)">Lap</button>
+            <button class="btn" @onclick="Reset">Reset</button>
+        </div>
+
+        @if (laps.Count > 0)
+        {
+            <div class="table-wrap lap-list">
+                <div class="thead">
+                    <span>Lap</span><span>Time</span><span>Total</span>
+                </div>
+                <div class="tbody">
+                    @for (var i = laps.Count - 1; i >= 0; i--)
+                    {
+                        var l = laps[i];
+                        <div class="trow">
+                            <span>@(i + 1)</span>
+                            <span>@Display(l.Lap)</span>
+                            <span>@Display(l.Total)</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="hint">Press <strong>Lap</strong> while running to record a lap.</div>
+        }
+    </section>
+</div>
+
+@code {
+    [Inject] private LocalStorageService Storage { get; set; } = null!;
+
+    private record LapEntry(TimeSpan Lap, TimeSpan Total);
+
+    private readonly System.Diagnostics.Stopwatch _sw = new();
+    private readonly List<LapEntry> laps = new();
+    private TimeSpan _lastTotal;
+    private bool _running;
+    private System.Timers.Timer? _tick;
+
+    private TimeSpan Elapsed => _sw.Elapsed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var json = await Storage.GetAsync("laps", string.Empty) ?? string.Empty;
+        if (!string.IsNullOrEmpty(json))
+        {
+            try
+            {
+                foreach (var part in json.Split('|', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var bits = part.Split(',');
+                    if (bits.Length != 2) continue;
+                    if (TimeSpan.TryParse(bits[0], System.Globalization.CultureInfo.InvariantCulture, out var lap) &&
+                        TimeSpan.TryParse(bits[1], System.Globalization.CultureInfo.InvariantCulture, out var total))
+                    {
+                        laps.Add(new LapEntry(lap, total));
+                        _lastTotal = total;
+                    }
+                }
+            }
+            catch { /* ignore malformed persistence */ }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _tick = new System.Timers.Timer(100);
+        _tick.Elapsed += (_, _) => InvokeAsync(StateHasChanged);
+        _tick.Start();
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private void Toggle()
+    {
+        if (_running)
+        {
+            _sw.Stop();
+            _running = false;
+        }
+        else
+        {
+            _sw.Start();
+            _running = true;
+        }
+    }
+
+    private async Task Lap()
+    {
+        if (!_running) return;
+        var total = _sw.Elapsed;
+        laps.Add(new LapEntry(total - _lastTotal, total));
+        _lastTotal = total;
+        await Persist();
+    }
+
+    private async Task Reset()
+    {
+        _running = false;
+        _sw.Reset();
+        laps.Clear();
+        _lastTotal = TimeSpan.Zero;
+        await Persist();
+    }
+
+    private Task Persist() =>
+        Storage.SetAsync("laps", string.Join("|", laps.Select(l => l.Lap.ToString("c", System.Globalization.CultureInfo.InvariantCulture) + "," + l.Total.ToString("c", System.Globalization.CultureInfo.InvariantCulture))));
+
+    private static string Display(TimeSpan t)
+    {
+        if (t.TotalHours >= 1)
+            return $"{(int)t.TotalHours:00}:{t.Minutes:00}:{t.Seconds:00}.{t.Milliseconds / 100:0}";
+        return $"{t.Minutes:00}:{t.Seconds:00}.{t.Milliseconds / 100:0}";
+    }
+
+    public void Dispose() => _tick?.Dispose();
+}

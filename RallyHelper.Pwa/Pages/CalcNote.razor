@@ -1,0 +1,94 @@
+@page "/calcnote"
+
+<PageTitle>Calculator / Notepad</PageTitle>
+
+<div class="single">
+    <section class="card">
+        <h2 class="card-title">Calculator / Notepad</h2>
+        <p class="hint">Speed = Distance / Time</p>
+
+        <div class="row-2">
+            <div class="field">
+                <label>Value 1</label>
+                <input class="input big" inputmode="decimal" value="@value1" @oninput="e => value1 = e.Value?.ToString() ?? string.Empty" />
+            </div>
+            <div class="field">
+                <label>Value 2</label>
+                <input class="input big" inputmode="decimal" value="@value2" @oninput="e => value2 = e.Value?.ToString() ?? string.Empty" />
+            </div>
+        </div>
+
+        <div class="ops">
+            <button class="btn op" @onclick="() => Operate('/')">÷</button>
+            <button class="btn op" @onclick="() => Operate('*')">×</button>
+            <button class="btn op" @onclick="() => Operate('-')">−</button>
+            <button class="btn op" @onclick="() => Operate('+')">+</button>
+        </div>
+
+        <div class="result @(result != null ? "has" : "")">@(result?.ToString("0.####") ?? "—")</div>
+
+        <div class="row-2">
+            <button class="btn" @onclick="MilesToKm">miles → Km</button>
+            <button class="btn" @onclick="KmToMiles">miles ← Km</button>
+        </div>
+        <button class="btn primary block" @onclick="SendToNote">Send result to notepad</button>
+
+        <label class="lbl">Notepad <span class="dim">(auto-saved)</span></label>
+        <textarea class="note" @bind="noteText" @bind:event="oninput" placeholder="Type here…"></textarea>
+    </section>
+</div>
+
+@code {
+    [Inject] private LocalStorageService Storage { get; set; } = null!;
+
+    private string value1 = string.Empty, value2 = string.Empty;
+    private double? result;
+    private string noteText = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        value1 = await Storage.GetAsync("calcV1", string.Empty) ?? string.Empty;
+        value2 = await Storage.GetAsync("calcV2", string.Empty) ?? string.Empty;
+        noteText = await Storage.GetAsync("calcNote", string.Empty) ?? string.Empty;
+    }
+
+    private void Operate(char op)
+    {
+        if (!double.TryParse(Get(value1), out var a) || !double.TryParse(Get(value2), out var b))
+            return;
+
+        result = op switch
+        {
+            '/' => b != 0 ? a / b : null,
+            '*' => a * b,
+            '-' => a - b,
+            '+' => a + b,
+            _ => null
+        };
+    }
+
+    private void MilesToKm()
+    {
+        if (double.TryParse(Get(value1), out var a)) result = a * RallyMath.MilesToKm;
+    }
+
+    private void KmToMiles()
+    {
+        if (double.TryParse(Get(value1), out var a)) result = a / RallyMath.MilesToKm;
+    }
+
+    private async Task SendToNote()
+    {
+        if (result is null) return;
+        await Persist();
+        noteText = (noteText.Length == 0 ? result?.ToString("0.####") : result?.ToString("0.####") + "\n" + noteText)!;
+        await Persist();
+    }
+
+    private static string Get(string s) => string.IsNullOrEmpty(s) ? "0" : s.Replace(',', '.');
+
+    private Task Persist() => Task.WhenAll(
+        Storage.SetAsync("calcV1", value1),
+        Storage.SetAsync("calcV2", value2),
+        Storage.SetAsync("calcNote", noteText));
+}

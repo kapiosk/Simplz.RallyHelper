@@ -1,0 +1,77 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+@inject GpsTimeService Gps
+
+<div class="app">
+
+    <header class="topbar">
+        <div class="brand">
+            <span class="flag">🏁</span>
+            <span class="brand-name">Rally Helper</span>
+        </div>
+        <div class="gps">
+            <div class="gps-clock" title="GPS-corrected time">@Gps.CorrectedNow.ToString("HH:mm:ss")</div>
+            <div class="gps-status @StatusClass()">
+                <span class="gps-dot"></span>
+                <span class="gps-text">@StatusText()</span>
+            </div>
+        </div>
+    </header>
+
+    <aside class="sidebar">
+        <nav class="navlinks">
+            <NavLink class="navlink" href="" Match="NavLinkMatch.All">
+                <span class="ico">🏁</span><span class="label">Dashboard</span>
+            </NavLink>
+            <NavLink class="navlink" href="calcnote">
+                <span class="ico">🧮</span><span class="label">CalcNote</span>
+            </NavLink>
+            <NavLink class="navlink" href="circuit">
+                <span class="ico">⏱</span><span class="label">Circuit</span>
+            </NavLink>
+        </nav>
+    </aside>
+
+    <main class="content">
+        <div class="page">
+            @Body
+        </div>
+        <footer class="foot">Rally Helper · remake of the VB6 original by SpeedsterK · GPS-corrected clock</footer>
+    </main>
+
+</div>
+
+@code {
+    private System.Threading.Timer? _uiTimer;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await Gps.StartAsync();
+        _uiTimer = new System.Threading.Timer(_ => InvokeAsync(StateHasChanged), null, 0, 200);
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    public void Dispose() => _uiTimer?.Dispose();
+
+    private string StatusClass() => Gps.Status switch
+    {
+        GpsStatus.Good => "good",
+        GpsStatus.Stale => "stale",
+        GpsStatus.Denied or GpsStatus.Error or GpsStatus.Timeout => "bad",
+        _ => "none"
+    };
+
+    private string StatusText()
+    {
+        return Gps.Status switch
+        {
+            GpsStatus.Good => $"GPS {Gps.LastAccuracy?.ToString("0.0") ?? "—"}m",
+            GpsStatus.Stale => "GPS stale",
+            GpsStatus.Denied => "GPS denied",
+            GpsStatus.Error => Gps.ErrorMessage ?? "GPS error",
+            GpsStatus.Timeout => "GPS timeout",
+            _ => "GPS off"
+        };
+    }
+}

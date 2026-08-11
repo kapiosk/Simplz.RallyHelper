@@ -1,0 +1,10 @@
+## .NET / Blazor build artifacts
+bin/
+obj/
+*.user
+.vs/
+*.suo
+
+## IDE
+.idea/
+.vscode/

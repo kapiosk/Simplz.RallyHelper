@@ -1,0 +1,530 @@
+﻿@page "/"
+@implements IDisposable
+
+<PageTitle>Rally Helper</PageTitle>
+
+<div class="dashboard">
+
+    @* ================= TSD Calculator + Timer1 (Frame1, Timer1) ================= *@
+    <section class="card tsd-card">
+        <h2 class="card-title">TSD Calculator</h2>
+
+        <div class="row-3">
+            <div class="field">
+                <label>Time h</label>
+                <input class="input center" inputmode="numeric" maxlength="2" value="@tH" @oninput="e => TsdTime(e.Value?.ToString(), 0)" />
+            </div>
+            <div class="field">
+                <label>min</label>
+                <input class="input center" inputmode="numeric" maxlength="2" value="@tM" @oninput="e => TsdTime(e.Value?.ToString(), 1)" />
+            </div>
+            <div class="field">
+                <label>sec</label>
+                <input class="input center" inputmode="numeric" maxlength="2" value="@tS" @oninput="e => TsdTime(e.Value?.ToString(), 2)" />
+            </div>
+        </div>
+
+        <div class="field">
+            <label>Speed (units / h)</label>
+            <input class="input" inputmode="decimal" value="@tSpeed" @oninput="e => tSpeed = e.Value?.ToString() ?? string.Empty" />
+        </div>
+
+        <div class="field">
+            <label>Distance (units)</label>
+            <input class="input" inputmode="decimal" value="@tDistance" @oninput="e => tDistance = e.Value?.ToString() ?? string.Empty" />
+        </div>
+
+        <div class="btn-row">
+            <button class="btn primary" @onclick="CalculateTsd">Calculate</button>
+            <button class="btn" @onclick="ClearTsd">Clear</button>
+        </div>
+
+        <div class="field">
+            <label>Distance Adder</label>
+            <input class="input" inputmode="decimal" value="@tAdder" @oninput="e => tAdder = e.Value?.ToString() ?? string.Empty" @onkeydown="AdderEnter" />
+        </div>
+        <button class="btn block" @onclick="AddDistance">+ Add to Distance</button>
+
+        <hr />
+
+        <h3 class="subtitle">Stopwatch</h3>
+        <div class="clock @(engine1Running ? "live" : "")">@HmsDisplay(_h1, _m1, _s1)</div>
+        <div class="pair">
+            <span>Start</span><strong>@StartClock</strong>
+            <span>Now</span><strong>@CurrentClock</strong>
+        </div>
+        <div class="pair small">
+            <span>Total</span><strong>@Timer1TotalMinutes min @Timer1Seconds s</strong>
+        </div>
+        <div class="btn-row">
+            <button class="btn primary" @onclick="ToggleEngine1">@(engine1Running ? "Pause" : "Start")</button>
+            <button class="btn" @onclick="ResetEngine1">Reset</button>
+        </div>
+    </section>
+
+    @* ================= Speed Time Table (Frame3) ================= *@
+    <section class="card table-card">
+        <h2 class="card-title">Speed Time Table</h2>
+
+        <div class="row-2">
+            <div class="field">
+                <label>Speed (Km/h)</label>
+                <input class="input" inputmode="decimal" value="@speedKmh" @oninput="e => SyncKmh(e.Value?.ToString() ?? string.Empty)" />
+            </div>
+            <div class="field">
+                <label>Speed (mph)</label>
+                <input class="input" inputmode="decimal" value="@speedMph" @oninput="e => SyncMph(e.Value?.ToString() ?? string.Empty)" />
+            </div>
+        </div>
+
+        <details class="error-box">
+            <summary>Error Correction</summary>
+            <div class="row-2">
+                <div class="field">
+                    <label>My reading</label>
+                    <input class="input" inputmode="decimal" value="@errMy" @oninput="e => errMy = e.Value?.ToString() ?? string.Empty" @onchange="() => _ = PersistState()" />
+                </div>
+                <div class="field">
+                    <label>Road Book</label>
+                    <input class="input" inputmode="decimal" value="@errRoad" @oninput="e => errRoad = e.Value?.ToString() ?? string.Empty" @onchange="() => _ = PersistState()" />
+                </div>
+            </div>
+            <div class="field">
+                <label>Error factor</label>
+                <input class="input" inputmode="decimal" value="@errFactor" @oninput="e => errFactor = e.Value?.ToString() ?? string.Empty" @onchange="() => _ = PersistState()" />
+            </div>
+            <label class="check">
+                <input type="checkbox" checked="@errorCorr" @onchange="e => { errorCorr = e.Value as bool? ?? false; _ = PersistState(); }" />
+                Use Error Correction
+            </label>
+        </details>
+
+        <button class="btn primary block" @onclick="CreateTable">Create Table</button>
+
+        @if (rows is { Count: > 0 })
+        {
+            <div class="target-bar">
+                <span class="target">@(LinkTimer2 && engine2Running ? "Target: " + CurrentTarget() : "Table ready")</span>
+                @if (LinkTimer2 && engine2Running)
+                {
+                    <span class="seg">@((int)CurrentIndexProgress())%</span>
+                }
+            </div>
+            <div class="table-wrap">
+                <div class="thead">
+                    <span>mi</span><span>target time</span>
+                </div>
+                <div class="tbody">
+                    @for (var i = 0; i < rows.Count; i++)
+                    {
+                        var idx = i;
+                        <div class="trow @(LinkTimer2 && ding == idx ? "on" : null)" @onclick="() => OnRowTap(idx)">
+                            <span>@rows[idx].DistanceMiles.ToString("0.#")</span>
+                            <span>@rows[idx].TimeText</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="hint">Set a speed and press <strong>Create Table</strong> to build target times for 0.1–10.1 miles.</div>
+        }
+    </section>
+
+    @* ================= Timer2 linked stage timer (Frame4) ================= *@
+    <section class="card stage-card">
+        <h2 class="card-title">Stage Timer</h2>
+
+        <div class="clock @(engine2Running ? "live" : "")">@HmsDisplay(_h2, _m2, _s2)</div>
+
+        @if (LinkTimer2 && rows is { Count: > 0 })
+        {
+            <div class="stage-compare">
+                <span>@CurrentTarget()</span>
+                <span class="sep">||</span>
+                <span>@CurrentStageClock()</span>
+            </div>
+            <div class="progress">
+                <div class="progress-fill" style="width: @((int)CurrentIndexProgress())%"></div>
+            </div>
+        }
+
+        <div class="btn-row">
+            <button class="btn primary" @onclick="ToggleEngine2">@(engine2Running ? "Pause" : "Start")</button>
+            <button class="btn" @onclick="ResetEngine2">Reset</button>
+        </div>
+
+        <label class="check">
+            <input type="checkbox" checked="@LinkTimer2" @onchange="e => { LinkTimer2 = e.Value as bool? ?? false; _ = PersistState(); }" />
+            Link to Speed Table
+        </label>
+
+        <div class="row-2 quick">
+            <div class="field">
+                <label>Quick speed (Km/h)</label>
+                <input class="input" inputmode="decimal" value="@quickSpeed" @oninput="e => quickSpeed = e.Value?.ToString() ?? string.Empty" @onchange="() => _ = PersistState()" />
+            </div>
+            <div class="field">
+                <label>&nbsp;</label>
+                <button class="btn block" @onclick="ApplyQuick">Apply (Jype)</button>
+            </div>
+        </div>
+    </section>
+
+    @* ================= Advanced Error (Frame6) ================= *@
+    <section class="card error-card">
+        <h2 class="card-title">Advanced Error</h2>
+        <div class="hint">Averages the 5 odometer ratio pairs (Road Book ÷ My) and writes the Error factor above.</div>
+        <div class="pairs">
+            @for (var p = 0; p < advError.Length; p++)
+            {
+                var pi = p;
+                <div class="pair-inputs">
+                    <input class="input" inputmode="decimal" placeholder="My" value="@advError[pi].My"
+                           @oninput="e => { advError[pi].My = e.Value?.ToString() ?? string.Empty; _ = PersistState(); }" />
+                    <input class="input" inputmode="decimal" placeholder="Road Book" value="@advError[pi].Road"
+                           @oninput="e => { advError[pi].Road = e.Value?.ToString() ?? string.Empty; _ = PersistState(); }" />
+                    <span class="ratio">@RatioText(advError[pi])</span>
+                </div>
+            }
+        </div>
+        <button class="btn primary block" @onclick="CalcAdvancedError">Calc Average</button>
+    </section>
+
+</div>
+
+@code {
+    [Inject] private LocalStorageService Storage { get; set; } = null!;
+    [Inject] private GpsTimeService Gps { get; set; } = null!;
+
+    private sealed class ErrorPair
+    {
+        public string My = string.Empty;
+        public string Road = string.Empty;
+    }
+
+    private System.Timers.Timer? _clock;
+    private readonly ErrorPair[] advError = Enumerable.Range(0, 5)
+        .Select(_ => new ErrorPair()).ToArray();
+
+    private string tH = string.Empty, tM = string.Empty, tS = string.Empty, tSpeed = string.Empty, tDistance = string.Empty, tAdder = string.Empty;
+    private string speedKmh = string.Empty, speedMph = string.Empty;
+    private string errMy = string.Empty, errRoad = string.Empty, errFactor = string.Empty;
+    private string quickSpeed = "30";
+    private bool errorCorr;
+    private bool LinkTimer2 = true;
+
+    private bool engine1Running, engine2Running;
+    private DateTimeOffset? _start1, _start2;
+    private TimeSpan _accumulated1, _accumulated2;
+    private int _h1, _m1, _s1;
+    private int _h2, _m2, _s2;
+    private int ding;
+    private string StartClock = "--:--:--";
+    private string CurrentClock = "--:--:--";
+    private int Timer1TotalMinutes, Timer1Seconds;
+
+    private List<RallyMath.TableRow>? rows;
+
+    protected override async Task OnInitializedAsync()
+    {
+        speedKmh = await Storage.GetAsync("speedKmh", string.Empty) ?? string.Empty;
+        speedMph = await Storage.GetAsync("speedMph", string.Empty) ?? string.Empty;
+        errMy = await Storage.GetAsync("errMy", string.Empty) ?? string.Empty;
+        errRoad = await Storage.GetAsync("errRoad", string.Empty) ?? string.Empty;
+        errFactor = await Storage.GetAsync("errFactor", string.Empty) ?? string.Empty;
+        quickSpeed = await Storage.GetAsync("quickSpeed", "30") ?? "30";
+        errorCorr = await Storage.GetBoolAsync("errorCorr", false);
+        LinkTimer2 = await Storage.GetBoolAsync("linkTimer2", true);
+        for (var i = 0; i < advError.Length; i++)
+        {
+            advError[i].My = await Storage.GetAsync($"advMy{i}", string.Empty) ?? string.Empty;
+            advError[i].Road = await Storage.GetAsync($"advRoad{i}", string.Empty) ?? string.Empty;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _clock = new System.Timers.Timer(1000);
+        _clock.Elapsed += (_, _) => OnTick();
+        _clock.AutoReset = true;
+        _clock.Start();
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private void OnTick()
+    {
+        var now = Gps.CorrectedNow;
+
+        if (engine1Running)
+        {
+            var elapsed = now - _start1!.Value + _accumulated1;
+            UpdateTimer1Display(elapsed);
+        }
+
+        if (engine2Running)
+        {
+            var elapsed = now - _start2!.Value + _accumulated2;
+            UpdateTimer2Display(elapsed);
+            AdvanceDing(elapsed.TotalSeconds);
+        }
+
+        CurrentClock = now.ToString("HH:mm:ss");
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void UpdateTimer1Display(TimeSpan elapsed)
+    {
+        var h = RallyMath.ToHms(elapsed.TotalSeconds);
+        _h1 = h.Hours; _m1 = h.Minutes; _s1 = h.Seconds;
+        Timer1TotalMinutes = h.Hours * 60 + h.Minutes;
+        Timer1Seconds = h.Seconds;
+    }
+
+    private void UpdateTimer2Display(TimeSpan elapsed)
+    {
+        var h = RallyMath.ToHms(elapsed.TotalSeconds);
+        _h2 = h.Hours; _m2 = h.Minutes; _s2 = h.Seconds;
+    }
+
+    public void Dispose() => _clock?.Dispose();
+
+    private void TsdTime(string? v, int idx)
+    {
+        var clean = v is null ? string.Empty : new string(v.Where(char.IsAsciiDigit).ToArray());
+        if (clean.Length > 2) clean = clean[..2];
+        if (idx == 0) tH = clean; else if (idx == 1) tM = clean; else tS = clean;
+    }
+
+    private static bool TryNum(string text, out double value) =>
+        double.TryParse(text.Replace(',', '.'), System.Globalization.CultureInfo.InvariantCulture, out value);
+
+    private void CalculateTsd()
+    {
+        bool timeEmpty = string.IsNullOrEmpty(tH) && string.IsNullOrEmpty(tM) && string.IsNullOrEmpty(tS);
+        bool speedEmpty = string.IsNullOrEmpty(tSpeed);
+        bool distEmpty = string.IsNullOrEmpty(tDistance);
+
+        if (timeEmpty && !speedEmpty && TryNum(tSpeed, out var sp) && sp > 0 && TryNum(tDistance, out var d))
+        {
+            var hms = RallyMath.ToHms(d / sp * 3600);
+            tH = hms.Hours.ToString();
+            tM = hms.Minutes.ToString("00");
+            tS = hms.Seconds.ToString("00");
+        }
+        else if (distEmpty && !speedEmpty && TryNum(tSpeed, out sp) && RallyMath.TryParseTime(tH, tM, tS, out var total))
+        {
+            tDistance = (sp * total / 3600.0).ToString("0.####");
+        }
+        else if (speedEmpty && !distEmpty && RallyMath.TryParseTime(tH, tM, tS, out total) && total > 0 && TryNum(tDistance, out d))
+        {
+            tSpeed = (d / (total / 3600.0)).ToString("0.####");
+        }
+    }
+
+    private void ClearTsd()
+    {
+        tH = tM = tS = tSpeed = tDistance = string.Empty;
+    }
+
+    private void AddDistance()
+    {
+        if (!TryNum(tDistance, out var d)) d = 0;
+        if (TryNum(tAdder, out var a)) d += a;
+        tDistance = d.ToString("0.####");
+    }
+
+    private void AdderEnter(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") AddDistance();
+    }
+
+    private void ToggleEngine1()
+    {
+        var now = Gps.CorrectedNow;
+        if (engine1Running)
+        {
+            _accumulated1 = now - _start1!.Value + _accumulated1;
+            engine1Running = false;
+            return;
+        }
+
+        if (_start1 == null) StartClock = now.ToString("HH:mm:ss");
+        _start1 = now - _accumulated1;
+        engine1Running = true;
+    }
+
+    private void ResetEngine1()
+    {
+        engine1Running = false;
+        _start1 = null; _accumulated1 = TimeSpan.Zero;
+        _h1 = _m1 = _s1 = 0;
+        StartClock = CurrentClock = "--:--:--";
+        Timer1TotalMinutes = Timer1Seconds = 0;
+    }
+
+    private void SyncKmh(string v)
+    {
+        speedKmh = v;
+        speedMph = TryNum(v, out var k) ? (k / RallyMath.MilesToKm).ToString("0.###") : string.Empty;
+        _ = PersistState();
+    }
+
+    private void SyncMph(string v)
+    {
+        speedMph = v;
+        speedKmh = TryNum(v, out var m) ? (m * RallyMath.MilesToKm).ToString("0.###") : string.Empty;
+        _ = PersistState();
+    }
+
+    private double ErrorFactor()
+    {
+        var err = 1.0;
+        if (errorCorr)
+        {
+            var my = TryNum(errMy, out var myV) ? myV : 1.0;
+            var rb = TryNum(errRoad, out var rbV) ? rbV : 1.0;
+            if (my > 0) err = rb / my;
+        }
+        if (TryNum(errFactor, out var manual) && manual > 0)
+            return manual;
+        return err;
+    }
+
+    private void CreateTable()
+    {
+        if (!TryNum(speedMph, out var mph) || mph <= 0) return;
+
+        var err = ErrorFactor();
+        if (!TryNum(errFactor, out _) && errorCorr)
+            errFactor = err.ToString("0.#####");
+
+        rows = RallyMath.BuildTable(mph, err);
+        ding = 0;
+        _ = PersistState();
+    }
+
+    private void ToggleEngine2()
+    {
+        var now = Gps.CorrectedNow;
+        if (engine2Running)
+        {
+            _accumulated2 = now - _start2!.Value + _accumulated2;
+            engine2Running = false;
+            return;
+        }
+
+        ResetStageCounters();
+        _start2 = now;
+        engine2Running = true;
+    }
+
+    private void ResetStageCounters()
+    {
+        _start2 = null; _accumulated2 = TimeSpan.Zero;
+        _h2 = _m2 = _s2 = 0;
+        ding = 0;
+    }
+
+    private void ResetEngine2()
+    {
+        engine2Running = false;
+        ResetStageCounters();
+    }
+
+    private void AdvanceDing(double elapsedSeconds)
+    {
+        if (!LinkTimer2 || rows is not { Count: > 0 }) return;
+        if (ding >= rows.Count) ding = 0;
+        var target = rows[ding].TotalSeconds;
+        if (elapsedSeconds >= target) ding++;
+        if (ding >= rows.Count) ding = 0;
+    }
+
+    private string CurrentTarget() =>
+        rows is { Count: > 0 } && ding < rows.Count ? rows[ding].TimeText : "--:--:--";
+
+    private string CurrentStageClock() => HmsDisplay(_h2, _m2, _s2);
+
+    private double CurrentIndexProgress()
+    {
+        if (!LinkTimer2 || rows is not { Count: > 1 }) return 0;
+        var elapsed = engine2Running
+            ? (Gps.CorrectedNow - _start2!.Value + _accumulated2).TotalSeconds
+            : _accumulated2.TotalSeconds;
+        var span = rows[1].TotalSeconds - rows[0].TotalSeconds;
+        if (span <= 0) return 0;
+        var segStart = ding > 0 ? rows[Math.Clamp(ding, 1, rows.Count - 1) - 1].TotalSeconds : 0;
+        return Math.Clamp((elapsed - segStart) / span * 100, 0, 100);
+    }
+
+    private void OnRowTap(int idx)
+    {
+        if (LinkTimer2 && rows is { Count: > 0 } && idx < rows.Count)
+            ding = idx;
+    }
+
+    private void ApplyQuick()
+    {
+        if (!TryNum(quickSpeed, out var k) || k <= 0) quickSpeed = "30";
+        SyncKmh(k.ToString("0.###"));
+        CreateTable();
+        ResetStageCounters();
+        _start2 = Gps.CorrectedNow;
+        engine2Running = true;
+    }
+
+    private string RatioText(ErrorPair p) =>
+        (TryNum(p.My, out var a) && TryNum(p.Road, out var b) && a > 0) ? (b / a).ToString("0.###") : "—";
+
+    private void CalcAdvancedError()
+    {
+        double sum = 0;
+        int count = 0;
+        foreach (var p in advError)
+        {
+            if (TryNum(p.My, out var a) && TryNum(p.Road, out var b) && a > 0)
+            {
+                sum += b / a;
+                count++;
+            }
+        }
+        if (count <= 0) return;
+
+        var avg = sum / count;
+        errFactor = avg.ToString("0.#####");
+        errMy = advError[0].My;
+        errRoad = advError[0].Road;
+        errorCorr = true;
+        _ = PersistState();
+    }
+
+    private static string HmsDisplay(int h, int m, int s) =>
+        $"{h:00}:{m:00}:{s:00}";
+
+    private async Task PersistState()
+    {
+        await Task.WhenAll(
+            Storage.SetAsync("speedKmh", speedKmh),
+            Storage.SetAsync("speedMph", speedMph),
+            Storage.SetAsync("errMy", errMy),
+            Storage.SetAsync("errRoad", errRoad),
+            Storage.SetAsync("errFactor", errFactor),
+            Storage.SetAsync("quickSpeed", quickSpeed),
+            Storage.SetBoolAsync("errorCorr", errorCorr),
+            Storage.SetBoolAsync("linkTimer2", LinkTimer2),
+            Storage.SetAsync("advMy0", advError[0].My),
+            Storage.SetAsync("advRoad0", advError[0].Road),
+            Storage.SetAsync("advMy1", advError[1].My),
+            Storage.SetAsync("advRoad1", advError[1].Road),
+            Storage.SetAsync("advMy2", advError[2].My),
+            Storage.SetAsync("advRoad2", advError[2].Road),
+            Storage.SetAsync("advMy3", advError[3].My),
+            Storage.SetAsync("advRoad3", advError[3].Road),
+            Storage.SetAsync("advMy4", advError[4].My),
+            Storage.SetAsync("advRoad4", advError[4].Road)
+        );
+    }
+}

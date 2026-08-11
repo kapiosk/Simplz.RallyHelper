@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+**/.git/
+**/publish/
+**/node_modules/
+**/.vs/
+**/.idea/
+**/*.user
+**/*.suo
+**/cdpvenv/
+/tmp/
