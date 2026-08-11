@@ -1,8 +1,17 @@
 ﻿@inherits LayoutComponentBase
 @implements IDisposable
 @inject GpsTimeService Gps
+@inject IJSRuntime JS
 
 <div class="app">
+
+    @if (updateAvailable)
+    {
+        <div class="update-banner" role="status" aria-live="polite">
+            <span>A new version is available.</span>
+            <button class="update-btn" @onclick="ApplyUpdate">Update now</button>
+        </div>
+    }
 
     <header class="topbar">
         <div class="brand">
@@ -43,16 +52,59 @@
 
 @code {
     private System.Threading.Timer? _uiTimer;
+    private IJSObjectReference? _pwaModule;
+    private DotNetObjectReference<MainLayout>? _selfRef;
+    private bool updateAvailable;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
         await Gps.StartAsync();
         _uiTimer = new System.Threading.Timer(_ => InvokeAsync(StateHasChanged), null, 0, 200);
+        await RegisterUpdateCheck();
         await base.OnAfterRenderAsync(firstRender);
     }
 
-    public void Dispose() => _uiTimer?.Dispose();
+    private async Task RegisterUpdateCheck()
+    {
+        try
+        {
+            _pwaModule = await JS.InvokeAsync<IJSObjectReference>("import", "./pwa-update.js");
+            _selfRef = DotNetObjectReference.Create(this);
+            await _pwaModule.InvokeVoidAsync("registerForUpdate", _selfRef);
+        }
+        catch
+        {
+            // update checks are best-effort; fail silently on unsupported browsers
+        }
+    }
+
+    [JSInvokable]
+    public void OnUpdateAvailable()
+    {
+        updateAvailable = true;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ApplyUpdate()
+    {
+        try
+        {
+            if (_pwaModule is not null)
+                await _pwaModule.InvokeVoidAsync("skipWaiting");
+        }
+        catch
+        {
+            // Fallback: hard reload if the SW message fails.
+            await JS.InvokeVoidAsync("location.reload");
+        }
+    }
+
+    public void Dispose()
+    {
+        _uiTimer?.Dispose();
+        _selfRef?.Dispose();
+    }
 
     private string StatusClass() => Gps.Status switch
     {
