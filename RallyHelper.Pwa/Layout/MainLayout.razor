@@ -1,6 +1,8 @@
 ﻿@inherits LayoutComponentBase
 @implements IDisposable
 @inject GpsTimeService Gps
+@inject WakeLockService WakeLock
+@inject LocalStorageService Storage
 @inject IJSRuntime JS
 
 <div class="app">
@@ -18,11 +20,18 @@
             <span class="flag">🏁</span>
             <span class="brand-name">Rally Helper</span>
         </div>
-        <div class="gps">
-            <div class="gps-clock" title="GPS-corrected time">@Gps.CorrectedNow.ToString("HH:mm:ss")</div>
-            <div class="gps-status @StatusClass()">
-                <span class="gps-dot"></span>
-                <span class="gps-text">@StatusText()</span>
+        <div class="topbar-actions">
+            <button class="wakelock-btn @(wakeLockOn ? "on" : null)" @onclick="ToggleWakeLock"
+                    disabled="@(!wakeLockSupported)"
+                    title="@(wakeLockSupported ? (wakeLockOn ? "Screen stays on (tap to disable)" : "Keep screen on") : "Screen wake lock not supported on this device")">
+                ☀️
+            </button>
+            <div class="gps">
+                <div class="gps-clock" title="GPS-corrected time">@Gps.CorrectedNow.ToString("HH:mm:ss")</div>
+                <div class="gps-status @StatusClass()">
+                    <span class="gps-dot"></span>
+                    <span class="gps-text">@StatusText()</span>
+                </div>
             </div>
         </div>
     </header>
@@ -55,6 +64,8 @@
     private IJSObjectReference? _pwaModule;
     private DotNetObjectReference<MainLayout>? _selfRef;
     private bool updateAvailable;
+    private bool wakeLockOn;
+    private bool wakeLockSupported;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -62,7 +73,24 @@
         await Gps.StartAsync();
         _uiTimer = new System.Threading.Timer(_ => InvokeAsync(StateHasChanged), null, 0, 200);
         await RegisterUpdateCheck();
+        await InitWakeLock();
         await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private async Task InitWakeLock()
+    {
+        await WakeLock.InitAsync();
+        wakeLockSupported = WakeLock.IsSupported;
+        wakeLockOn = await Storage.GetBoolAsync("keepScreenOn", false) && wakeLockSupported;
+        if (wakeLockOn)
+            await WakeLock.SetEnabledAsync(true);
+    }
+
+    private async Task ToggleWakeLock()
+    {
+        wakeLockOn = !wakeLockOn;
+        await WakeLock.SetEnabledAsync(wakeLockOn);
+        await Storage.SetBoolAsync("keepScreenOn", wakeLockOn);
     }
 
     private async Task RegisterUpdateCheck()

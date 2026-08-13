@@ -10,5 +10,6 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
 builder.Services.AddSingleton<LocalStorageService>();
 builder.Services.AddSingleton<GpsTimeService>();
+builder.Services.AddSingleton<WakeLockService>();
 
 await builder.Build().RunAsync();
