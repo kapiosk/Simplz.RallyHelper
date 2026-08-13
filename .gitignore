@@ -1,5 +1,6 @@
 ## Build output
 build/
+bin/
 obj/
 *.user
 .vs/
@@ -8,3 +9,6 @@ obj/
 ## IDE
 .idea/
 .vscode/
+
+## Tools
+.wrangler/
