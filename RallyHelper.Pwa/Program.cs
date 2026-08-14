@@ -11,5 +11,6 @@ builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.
 builder.Services.AddSingleton<LocalStorageService>();
 builder.Services.AddSingleton<GpsTimeService>();
 builder.Services.AddSingleton<WakeLockService>();
+builder.Services.AddSingleton<NotificationService>();
 
 await builder.Build().RunAsync();

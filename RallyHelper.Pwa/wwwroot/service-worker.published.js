@@ -7,6 +7,15 @@ self.addEventListener('message', event => {
     }
 });
 
+// Tapping a notification closes it and focuses the app (or reopens it).
+self.addEventListener('notificationclick', event => {
+    event.notification.close();
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list =>
+            list.length > 0 ? list[0].focus() : clients.openWindow('./'))
+    );
+});
+
 self.importScripts('./service-worker-assets.js');
 self.addEventListener('install', event => event.waitUntil(onInstall(event)));
 self.addEventListener('activate', event => event.waitUntil(onActivate(event)));

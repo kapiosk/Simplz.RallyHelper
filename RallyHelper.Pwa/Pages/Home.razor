@@ -160,6 +160,18 @@
             Link to Speed Table
         </label>
 
+        @if (notifSupported)
+        {
+            <label class="check">
+                <input type="checkbox" checked="@notifySegment" @onchange="ToggleNotifySegment" />
+                Notify on target change when in background
+            </label>
+            @if (notifPermission == "denied")
+            {
+                <div class="hint">Notifications are blocked — enable them in your browser's site settings for this app.</div>
+            }
+        }
+
         <div class="row-2 quick">
             <div class="field">
                 <label>Quick speed (Km/h)</label>
@@ -197,6 +209,7 @@
 @code {
     [Inject] private LocalStorageService Storage { get; set; } = null!;
     [Inject] private GpsTimeService Gps { get; set; } = null!;
+    [Inject] private NotificationService Notifications { get; set; } = null!;
 
     private sealed class ErrorPair
     {
@@ -214,6 +227,10 @@
     private string quickSpeed = "30";
     private bool errorCorr;
     private bool LinkTimer2 = true;
+    private bool notifySegment;
+    private bool notifSupported;
+    private string notifPermission = "default";
+    private int _lastNotifiedDing;
 
     private bool engine1Running, engine2Running;
     private DateTimeOffset? _start1, _start2;
@@ -237,6 +254,7 @@
         quickSpeed = await Storage.GetAsync("quickSpeed", "30") ?? "30";
         errorCorr = await Storage.GetBoolAsync("errorCorr", false);
         LinkTimer2 = await Storage.GetBoolAsync("linkTimer2", true);
+        notifySegment = await Storage.GetBoolAsync("notifySegment", false);
         for (var i = 0; i < advError.Length; i++)
         {
             advError[i].My = await Storage.GetAsync($"advMy{i}", string.Empty) ?? string.Empty;
@@ -251,6 +269,10 @@
         _clock.Elapsed += (_, _) => OnTick();
         _clock.AutoReset = true;
         _clock.Start();
+        await Notifications.InitAsync();
+        notifSupported = Notifications.IsSupported;
+        notifPermission = Notifications.Permission;
+        StateHasChanged();
         await base.OnAfterRenderAsync(firstRender);
     }
 
@@ -412,6 +434,7 @@
 
         rows = RallyMath.BuildTable(mph, err);
         ding = 0;
+        _lastNotifiedDing = 0;
         _ = PersistState();
     }
 
@@ -435,6 +458,7 @@
         _start2 = null; _accumulated2 = TimeSpan.Zero;
         _h2 = _m2 = _s2 = 0;
         ding = 0;
+        _lastNotifiedDing = 0;
     }
 
     private void ResetEngine2()
@@ -446,10 +470,25 @@
     private void AdvanceDing(double elapsedSeconds)
     {
         if (!LinkTimer2 || rows is not { Count: > 0 }) return;
-        if (ding >= rows.Count) ding = 0;
-        var target = rows[ding].TotalSeconds;
-        if (elapsedSeconds >= target) ding++;
-        if (ding >= rows.Count) ding = 0;
+
+        // Advance through every segment whose target has passed. Ticks can be
+        // throttled while the app is in the background, so catch up to the
+        // current segment rather than stepping one segment per tick.
+        while (ding < rows.Count && elapsedSeconds >= rows[ding].TotalSeconds) ding++;
+        if (ding >= rows.Count)
+        {
+            ding = 0;
+            _lastNotifiedDing = 0;
+        }
+
+        if (notifySegment && ding > _lastNotifiedDing)
+        {
+            _lastNotifiedDing = ding;
+            var row = rows[ding];
+            _ = Notifications.ShowIfHiddenAsync(
+                "Rally Helper",
+                $"Next target {row.TimeText} at {row.DistanceMiles:0.#} mi");
+        }
     }
 
     private string CurrentTarget() =>
@@ -472,7 +511,10 @@
     private void OnRowTap(int idx)
     {
         if (LinkTimer2 && rows is { Count: > 0 } && idx < rows.Count)
+        {
             ding = idx;
+            _lastNotifiedDing = idx;
+        }
     }
 
     private void ApplyQuick()
@@ -483,6 +525,19 @@
         ResetStageCounters();
         _start2 = Gps.CorrectedNow;
         engine2Running = true;
+    }
+
+    private async Task ToggleNotifySegment(ChangeEventArgs e)
+    {
+        notifySegment = e.Value as bool? ?? false;
+        if (notifySegment && notifPermission != "granted")
+        {
+            // Requires a user gesture; this change event qualifies.
+            notifPermission = await Notifications.RequestPermissionAsync();
+            if (notifPermission != "granted")
+                notifySegment = false;
+        }
+        await PersistState();
     }
 
     private string RatioText(ErrorPair p) =>
@@ -524,6 +579,7 @@
             Storage.SetAsync("quickSpeed", quickSpeed),
             Storage.SetBoolAsync("errorCorr", errorCorr),
             Storage.SetBoolAsync("linkTimer2", LinkTimer2),
+            Storage.SetBoolAsync("notifySegment", notifySegment),
             Storage.SetAsync("advMy0", advError[0].My),
             Storage.SetAsync("advRoad0", advError[0].Road),
             Storage.SetAsync("advMy1", advError[1].My),
